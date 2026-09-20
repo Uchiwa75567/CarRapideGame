@@ -1,5 +1,7 @@
 using System;
 using System.Collections;
+using System.Collections.Generic;
+using System.Linq;
 using UnityEngine;
 using UnityEngine.InputSystem;
 
@@ -23,14 +25,6 @@ namespace CarRapide.Vehicle
         private const string DriverResource = "CarRapide/Characters/Black_M_1_Casual";
         private const string ReceiverResource = "CarRapide/Characters/Black_M_2_Casual";
 
-        private static readonly Vector3 ExteriorCameraOffset = new Vector3(-4.2f, 2.6f, -4.5f);
-        private static readonly Vector3 CabinCameraOffset = new Vector3(-1.65f, 1.75f, 0.7f);
-        private static readonly Vector3 DrivingCameraOffset = new Vector3(0f, 4f, -7f);
-
-        private static readonly Vector3 DriverOutsidePosition = new Vector3(-1.45f, 0f, 0.65f);
-        private static readonly Vector3 DriverSeatPosition = new Vector3(-0.42f, 0.48f, 0.78f);
-        private static readonly Vector3 ReceiverPosition = new Vector3(0.45f, 0.05f, -1.95f);
-
         private VehicleController vehicleController;
         private Rigidbody vehicleRigidbody;
         private VehicleCameraFollow cameraFollow;
@@ -39,6 +33,14 @@ namespace CarRapide.Vehicle
         private AudioSource engineStartSource;
         private AudioSource engineLoopSource;
         private ExperienceState state;
+
+        private Bounds vehicleBoundsLocal;
+        private Vector3 driverOutsidePosition;
+        private Vector3 driverSeatPosition;
+        private Vector3 receiverPosition;
+        private Vector3 exteriorCameraOffset;
+        private Vector3 cabinCameraOffset;
+        private Vector3 drivingCameraOffset;
 
         [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.AfterSceneLoad)]
         private static void AutoAttachToPlayableVehicle()
@@ -62,14 +64,16 @@ namespace CarRapide.Vehicle
 
         private void Start()
         {
+            CalculateVehicleLayout();
+
             cameraFollow = FindFirstObjectByType<VehicleCameraFollow>();
             if (cameraFollow != null)
             {
                 cameraFollow.SetTarget(transform);
-                cameraFollow.SetView(ExteriorCameraOffset, 1.15f, 0.2f);
+                cameraFollow.SetView(exteriorCameraOffset, vehicleBoundsLocal.size.y * 0.55f, 0.2f);
             }
 
-            BuildDoor();
+            SetupRealDriverDoor();
             BuildCharacters();
             BuildAudio();
 
@@ -107,13 +111,169 @@ namespace CarRapide.Vehicle
             }
         }
 
+        private void CalculateVehicleLayout()
+        {
+            Transform modelRoot = FindDeepChild(transform, "Car rapide") ?? transform;
+            Renderer[] renderers = modelRoot.GetComponentsInChildren<Renderer>(true);
+
+            if (renderers.Length == 0)
+            {
+                vehicleBoundsLocal = new Bounds(Vector3.zero, new Vector3(1.6f, 2.1f, 3.8f));
+            }
+            else
+            {
+                bool initialized = false;
+                Bounds local = default;
+
+                foreach (Renderer renderer in renderers)
+                {
+                    foreach (Vector3 corner in BoundsCorners(renderer.bounds))
+                    {
+                        Vector3 point = transform.InverseTransformPoint(corner);
+                        if (!initialized)
+                        {
+                            local = new Bounds(point, Vector3.zero);
+                            initialized = true;
+                        }
+                        else
+                        {
+                            local.Encapsulate(point);
+                        }
+                    }
+                }
+
+                vehicleBoundsLocal = local;
+            }
+
+            float width = vehicleBoundsLocal.size.x;
+            float height = vehicleBoundsLocal.size.y;
+            float length = vehicleBoundsLocal.size.z;
+
+            driverOutsidePosition = new Vector3(
+                vehicleBoundsLocal.min.x - Mathf.Max(0.22f, width * 0.10f),
+                vehicleBoundsLocal.min.y,
+                vehicleBoundsLocal.center.z + length * 0.24f);
+
+            driverSeatPosition = new Vector3(
+                vehicleBoundsLocal.min.x + width * 0.27f,
+                vehicleBoundsLocal.min.y + height * 0.32f,
+                vehicleBoundsLocal.center.z + length * 0.27f);
+
+            receiverPosition = new Vector3(
+                vehicleBoundsLocal.center.x,
+                vehicleBoundsLocal.min.y + 0.03f,
+                vehicleBoundsLocal.min.z - Mathf.Max(0.08f, length * 0.025f));
+
+            exteriorCameraOffset = new Vector3(
+                -Mathf.Max(3.6f, width * 2.2f),
+                Mathf.Max(2.4f, height * 1.25f),
+                -Mathf.Max(3.4f, length * 0.85f));
+
+            cabinCameraOffset = new Vector3(
+                vehicleBoundsLocal.min.x - width * 0.18f,
+                vehicleBoundsLocal.min.y + height * 0.72f,
+                vehicleBoundsLocal.center.z + length * 0.30f);
+
+            drivingCameraOffset = new Vector3(
+                0f,
+                Mathf.Max(3.8f, height * 1.75f),
+                -Mathf.Max(6.8f, length * 1.75f));
+        }
+
+        private void SetupRealDriverDoor()
+        {
+            Transform modelRoot = FindDeepChild(transform, "Car rapide");
+            if (modelRoot == null)
+            {
+                Debug.LogWarning("Car Rapide: modèle visuel introuvable, impossible d'animer la vraie porte.");
+                return;
+            }
+
+            Transform[] all = modelRoot.GetComponentsInChildren<Transform>(true);
+            List<Transform> doorParts = all
+                .Where(t => t.name.StartsWith("Porte_avant_gauche", StringComparison.OrdinalIgnoreCase))
+                .ToList();
+
+            if (doorParts.Count == 0)
+            {
+                Debug.LogWarning("Car Rapide: 'Porte_avant_gauche' introuvable dans le FBX.");
+                return;
+            }
+
+            HashSet<Transform> matches = new HashSet<Transform>(doorParts);
+            List<Transform> topLevelDoorParts = doorParts
+                .Where(t =>
+                {
+                    Transform parent = t.parent;
+                    while (parent != null && parent != modelRoot.parent)
+                    {
+                        if (matches.Contains(parent))
+                        {
+                            return false;
+                        }
+                        parent = parent.parent;
+                    }
+                    return true;
+                })
+                .ToList();
+
+            bool initialized = false;
+            Bounds localDoorBounds = default;
+
+            foreach (Transform part in doorParts)
+            {
+                foreach (Renderer renderer in part.GetComponentsInChildren<Renderer>(true))
+                {
+                    foreach (Vector3 corner in BoundsCorners(renderer.bounds))
+                    {
+                        Vector3 local = transform.InverseTransformPoint(corner);
+                        if (!initialized)
+                        {
+                            localDoorBounds = new Bounds(local, Vector3.zero);
+                            initialized = true;
+                        }
+                        else
+                        {
+                            localDoorBounds.Encapsulate(local);
+                        }
+                    }
+                }
+            }
+
+            if (!initialized)
+            {
+                Debug.LogWarning("Car Rapide: la porte gauche n'a pas de Renderer.");
+                return;
+            }
+
+            GameObject pivotObject = new GameObject("DriverDoorHinge_RealModel");
+            pivotObject.transform.SetParent(transform, false);
+            pivotObject.transform.localPosition = new Vector3(
+                localDoorBounds.center.x,
+                localDoorBounds.center.y,
+                localDoorBounds.max.z);
+            pivotObject.transform.localRotation = Quaternion.identity;
+            doorPivot = pivotObject.transform;
+
+            foreach (Transform part in topLevelDoorParts)
+            {
+                part.SetParent(doorPivot, true);
+            }
+        }
+
         private IEnumerator OpenDoorRoutine()
         {
+            if (doorPivot == null)
+            {
+                state = ExperienceState.DoorOpen;
+                yield break;
+            }
+
             state = ExperienceState.DoorOpening;
 
             Quaternion start = doorPivot.localRotation;
-            Quaternion target = Quaternion.Euler(0f, -78f, 0f);
-            const float duration = 0.7f;
+            Quaternion target = Quaternion.Euler(0f, 72f, 0f);
+            const float duration = 0.75f;
 
             for (float time = 0f; time < duration; time += Time.deltaTime)
             {
@@ -128,27 +288,36 @@ namespace CarRapide.Vehicle
 
         private IEnumerator EnterVehicleRoutine()
         {
+            if (driverCharacter == null)
+            {
+                state = ExperienceState.Seated;
+                yield break;
+            }
+
             state = ExperienceState.Entering;
 
             if (cameraFollow != null)
             {
-                cameraFollow.SetView(CabinCameraOffset, 1.25f, 0.45f);
+                cameraFollow.SetView(
+                    cabinCameraOffset,
+                    vehicleBoundsLocal.size.y * 0.62f,
+                    0.45f);
             }
 
             Vector3 startPosition = driverCharacter.localPosition;
             Quaternion startRotation = driverCharacter.localRotation;
-            Quaternion targetRotation = Quaternion.Euler(0f, 0f, 0f);
+            Quaternion targetRotation = Quaternion.identity;
 
             const float duration = 1.15f;
             for (float time = 0f; time < duration; time += Time.deltaTime)
             {
                 float t = Mathf.SmoothStep(0f, 1f, time / duration);
-                driverCharacter.localPosition = Vector3.Lerp(startPosition, DriverSeatPosition, t);
+                driverCharacter.localPosition = Vector3.Lerp(startPosition, driverSeatPosition, t);
                 driverCharacter.localRotation = Quaternion.Slerp(startRotation, targetRotation, t);
                 yield return null;
             }
 
-            driverCharacter.localPosition = DriverSeatPosition;
+            driverCharacter.localPosition = driverSeatPosition;
             driverCharacter.localRotation = targetRotation;
             TryApplySeatedPose(driverCharacter.gameObject);
 
@@ -158,6 +327,11 @@ namespace CarRapide.Vehicle
 
         private IEnumerator CloseDoorRoutine()
         {
+            if (doorPivot == null)
+            {
+                yield break;
+            }
+
             Quaternion start = doorPivot.localRotation;
             Quaternion target = Quaternion.identity;
             const float duration = 0.55f;
@@ -195,44 +369,41 @@ namespace CarRapide.Vehicle
 
             if (cameraFollow != null)
             {
-                cameraFollow.SetView(DrivingCameraOffset, 1.2f, 1.15f);
+                cameraFollow.SetView(
+                    drivingCameraOffset,
+                    vehicleBoundsLocal.size.y * 0.55f,
+                    1.15f);
             }
 
             state = ExperienceState.Driving;
         }
 
-        private void BuildDoor()
-        {
-            GameObject pivot = new GameObject("DriverDoorPivot");
-            pivot.transform.SetParent(transform);
-            pivot.transform.localPosition = new Vector3(-0.78f, 0.35f, 0.72f);
-            pivot.transform.localRotation = Quaternion.identity;
-            doorPivot = pivot.transform;
-
-            Material yellow = RuntimeMaterial(new Color(0.92f, 0.57f, 0.05f));
-            Material blue = RuntimeMaterial(new Color(0.04f, 0.22f, 0.43f));
-
-            CreateDoorPanel("DoorUpper", doorPivot, new Vector3(-0.04f, 0.95f, 0f), new Vector3(0.08f, 0.72f, 0.82f), yellow);
-            CreateDoorPanel("DoorLower", doorPivot, new Vector3(-0.04f, 0.30f, 0f), new Vector3(0.08f, 0.58f, 0.82f), blue);
-        }
-
         private void BuildCharacters()
         {
-            driverCharacter = CreateCharacter(
+            GameObject driver = CreateCharacter(
                 "Chauffeur",
                 DriverResource,
-                DriverOutsidePosition,
+                driverOutsidePosition,
                 Quaternion.Euler(0f, 90f, 0f),
-                1.72f).transform;
+                Mathf.Max(1.50f, vehicleBoundsLocal.size.y * 0.82f));
+
+            if (driver != null)
+            {
+                driverCharacter = driver.transform;
+                TryApplyStandingPose(driver, false);
+            }
 
             GameObject receiver = CreateCharacter(
                 "ApprentiReceveur",
                 ReceiverResource,
-                ReceiverPosition,
+                receiverPosition,
                 Quaternion.Euler(0f, 180f, 0f),
-                1.68f);
+                Mathf.Max(1.48f, vehicleBoundsLocal.size.y * 0.79f));
 
-            receiver.transform.SetParent(transform, false);
+            if (receiver != null)
+            {
+                TryApplyStandingPose(receiver, true);
+            }
         }
 
         private GameObject CreateCharacter(
@@ -243,28 +414,31 @@ namespace CarRapide.Vehicle
             float targetHeight)
         {
             GameObject prefab = Resources.Load<GameObject>(resourcePath);
-            GameObject character;
-
-            if (prefab != null)
+            if (prefab == null)
             {
-                character = Instantiate(prefab, transform);
-                character.name = characterName;
-                NormalizeCharacterHeight(character, targetHeight);
-            }
-            else
-            {
-                character = CreatePlaceholderHuman(characterName);
-                character.transform.SetParent(transform, false);
+                Debug.LogWarning(
+                    $"Car Rapide: personnage '{characterName}' absent. " +
+                    "Utilise Car Rapide > Vehicle > Download / Fix Driver & Receiver.");
+                return null;
             }
 
+            GameObject character = Instantiate(prefab, transform);
+            character.name = characterName;
+            NormalizeCharacterHeight(character, targetHeight);
             character.transform.localPosition = localPosition;
             character.transform.localRotation = localRotation;
+
+            foreach (Collider collider in character.GetComponentsInChildren<Collider>(true))
+            {
+                collider.enabled = false;
+            }
+
             return character;
         }
 
         private static void NormalizeCharacterHeight(GameObject character, float targetHeight)
         {
-            Renderer[] renderers = character.GetComponentsInChildren<Renderer>();
+            Renderer[] renderers = character.GetComponentsInChildren<Renderer>(true);
             if (renderers.Length == 0)
             {
                 return;
@@ -283,85 +457,6 @@ namespace CarRapide.Vehicle
 
             float scale = targetHeight / bounds.size.y;
             character.transform.localScale *= scale;
-        }
-
-        private GameObject CreatePlaceholderHuman(string characterName)
-        {
-            GameObject root = new GameObject(characterName + " Placeholder");
-
-            Material skin = RuntimeMaterial(new Color(0.20f, 0.105f, 0.065f));
-            Material shirt = RuntimeMaterial(new Color(0.055f, 0.08f, 0.14f));
-            Material shorts = RuntimeMaterial(new Color(0.60f, 0.07f, 0.08f));
-
-            CreateBodyPart("Torso", PrimitiveType.Capsule, root.transform, new Vector3(0f, 1.15f, 0f), new Vector3(0.35f, 0.48f, 0.22f), Quaternion.identity, shirt);
-            CreateBodyPart("Head", PrimitiveType.Sphere, root.transform, new Vector3(0f, 1.82f, 0f), new Vector3(0.24f, 0.28f, 0.24f), Quaternion.identity, skin);
-            CreateBodyPart("LeftArm", PrimitiveType.Capsule, root.transform, new Vector3(-0.43f, 1.15f, 0f), new Vector3(0.11f, 0.42f, 0.11f), Quaternion.Euler(0f, 0f, -8f), skin);
-            CreateBodyPart("RightArm", PrimitiveType.Capsule, root.transform, new Vector3(0.43f, 1.15f, 0f), new Vector3(0.11f, 0.42f, 0.11f), Quaternion.Euler(0f, 0f, 8f), skin);
-            CreateBodyPart("Shorts", PrimitiveType.Cube, root.transform, new Vector3(0f, 0.78f, 0f), new Vector3(0.55f, 0.38f, 0.28f), Quaternion.identity, shorts);
-            CreateBodyPart("LeftLeg", PrimitiveType.Capsule, root.transform, new Vector3(-0.17f, 0.35f, 0f), new Vector3(0.13f, 0.42f, 0.13f), Quaternion.identity, skin);
-            CreateBodyPart("RightLeg", PrimitiveType.Capsule, root.transform, new Vector3(0.17f, 0.35f, 0f), new Vector3(0.13f, 0.42f, 0.13f), Quaternion.identity, skin);
-
-            return root;
-        }
-
-        private static void CreateBodyPart(
-            string partName,
-            PrimitiveType primitive,
-            Transform parent,
-            Vector3 localPosition,
-            Vector3 localScale,
-            Quaternion localRotation,
-            Material material)
-        {
-            GameObject part = GameObject.CreatePrimitive(primitive);
-            part.name = partName;
-            part.transform.SetParent(parent, false);
-            part.transform.localPosition = localPosition;
-            part.transform.localScale = localScale;
-            part.transform.localRotation = localRotation;
-
-            Collider collider = part.GetComponent<Collider>();
-            if (collider != null)
-            {
-                collider.enabled = false;
-            }
-
-            part.GetComponent<Renderer>().sharedMaterial = material;
-        }
-
-        private static void CreateDoorPanel(
-            string panelName,
-            Transform parent,
-            Vector3 localPosition,
-            Vector3 localScale,
-            Material material)
-        {
-            GameObject panel = GameObject.CreatePrimitive(PrimitiveType.Cube);
-            panel.name = panelName;
-            panel.transform.SetParent(parent, false);
-            panel.transform.localPosition = localPosition;
-            panel.transform.localScale = localScale;
-
-            Collider collider = panel.GetComponent<Collider>();
-            if (collider != null)
-            {
-                collider.enabled = false;
-            }
-
-            panel.GetComponent<Renderer>().sharedMaterial = material;
-        }
-
-        private static Material RuntimeMaterial(Color color)
-        {
-            Shader shader = Shader.Find("Universal Render Pipeline/Lit");
-            if (shader == null)
-            {
-                shader = Shader.Find("Standard");
-            }
-
-            Material material = new Material(shader);
-            material.color = color;
-            return material;
         }
 
         private void BuildAudio()
@@ -415,7 +510,6 @@ namespace CarRapide.Vehicle
         private static AudioClip CreateEngineLoopClip()
         {
             const int sampleRate = 44100;
-            const float duration = 1f;
             int sampleCount = sampleRate;
             float[] samples = new float[sampleCount];
             double phase = 0d;
@@ -438,6 +532,35 @@ namespace CarRapide.Vehicle
             return clip;
         }
 
+        private static void TryApplyStandingPose(GameObject character, bool receiverPose)
+        {
+            Animator animator = character.GetComponentInChildren<Animator>();
+            if (animator == null || animator.avatar == null || !animator.avatar.isHuman)
+            {
+                return;
+            }
+
+            try
+            {
+                HumanPoseHandler handler = new HumanPoseHandler(animator.avatar, animator.transform);
+                HumanPose pose = new HumanPose { muscles = new float[HumanTrait.MuscleCount] };
+                handler.GetHumanPose(ref pose);
+
+                SetMuscle(ref pose, "Left Arm Down-Up", -0.88f);
+                SetMuscle(ref pose, "Right Arm Down-Up", receiverPose ? 0.55f : -0.88f);
+                SetMuscle(ref pose, "Left Arm Front-Back", 0.02f);
+                SetMuscle(ref pose, "Right Arm Front-Back", receiverPose ? -0.18f : 0.02f);
+                SetMuscle(ref pose, "Right Forearm Stretch", receiverPose ? -0.38f : 0f);
+
+                handler.SetHumanPose(ref pose);
+                handler.Dispose();
+            }
+            catch (Exception exception)
+            {
+                Debug.LogWarning($"Pose personnage non appliquée: {exception.Message}");
+            }
+        }
+
         private static void TryApplySeatedPose(GameObject character)
         {
             Animator animator = character.GetComponentInChildren<Animator>();
@@ -449,19 +572,17 @@ namespace CarRapide.Vehicle
             try
             {
                 HumanPoseHandler handler = new HumanPoseHandler(animator.avatar, animator.transform);
-                HumanPose pose = new HumanPose
-                {
-                    muscles = new float[HumanTrait.MuscleCount]
-                };
-
+                HumanPose pose = new HumanPose { muscles = new float[HumanTrait.MuscleCount] };
                 handler.GetHumanPose(ref pose);
 
                 SetMuscle(ref pose, "Left Upper Leg Front-Back", -0.72f);
                 SetMuscle(ref pose, "Right Upper Leg Front-Back", -0.72f);
                 SetMuscle(ref pose, "Left Knee Stretch", -0.88f);
                 SetMuscle(ref pose, "Right Knee Stretch", -0.88f);
-                SetMuscle(ref pose, "Left Arm Front-Back", -0.32f);
-                SetMuscle(ref pose, "Right Arm Front-Back", -0.32f);
+                SetMuscle(ref pose, "Left Arm Down-Up", -0.50f);
+                SetMuscle(ref pose, "Right Arm Down-Up", -0.50f);
+                SetMuscle(ref pose, "Left Arm Front-Back", -0.34f);
+                SetMuscle(ref pose, "Right Arm Front-Back", -0.34f);
                 SetMuscle(ref pose, "Left Forearm Stretch", -0.55f);
                 SetMuscle(ref pose, "Right Forearm Stretch", -0.55f);
 
@@ -487,11 +608,39 @@ namespace CarRapide.Vehicle
             }
         }
 
+        private static Transform FindDeepChild(Transform root, string exactName)
+        {
+            foreach (Transform child in root.GetComponentsInChildren<Transform>(true))
+            {
+                if (child.name.Equals(exactName, StringComparison.OrdinalIgnoreCase))
+                {
+                    return child;
+                }
+            }
+
+            return null;
+        }
+
+        private static IEnumerable<Vector3> BoundsCorners(Bounds bounds)
+        {
+            Vector3 min = bounds.min;
+            Vector3 max = bounds.max;
+
+            yield return new Vector3(min.x, min.y, min.z);
+            yield return new Vector3(min.x, min.y, max.z);
+            yield return new Vector3(min.x, max.y, min.z);
+            yield return new Vector3(min.x, max.y, max.z);
+            yield return new Vector3(max.x, min.y, min.z);
+            yield return new Vector3(max.x, min.y, max.z);
+            yield return new Vector3(max.x, max.y, min.z);
+            yield return new Vector3(max.x, max.y, max.z);
+        }
+
         private void OnGUI()
         {
             string instruction = state switch
             {
-                ExperienceState.WaitingForDoor => "Moteur éteint — E : ouvrir la porte",
+                ExperienceState.WaitingForDoor => "Moteur éteint — E : ouvrir la vraie porte du Car Rapide",
                 ExperienceState.DoorOpening => "Ouverture de la porte...",
                 ExperienceState.DoorOpen => "E : s'installer au volant",
                 ExperienceState.Entering => "Installation du chauffeur...",
@@ -501,7 +650,7 @@ namespace CarRapide.Vehicle
                 _ => string.Empty
             };
 
-            GUI.Box(new Rect(18f, 18f, 590f, 68f), instruction);
+            GUI.Box(new Rect(18f, 18f, 650f, 68f), instruction);
         }
     }
 }

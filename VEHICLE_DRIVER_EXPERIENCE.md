@@ -1,56 +1,37 @@
 # Vehicle driver experience
 
-This branch contains a first playable version of the driver flow requested during PR review.
+This branch contains the first review version of the driver flow.
 
-## Implemented flow
+## Current implementation
 
-1. The Car Rapide starts stationary with its engine off.
-2. Press **E** to open the driver's door.
-3. Press **E** again to enter the vehicle.
-4. During entry, the camera moves close to the cabin.
-5. Press **R** to start the engine.
-6. Driving controls remain disabled until the engine has started.
-7. The camera transitions smoothly back behind the vehicle.
-8. An apprentice / receiver is attached to the rear platform.
-9. A procedural start sound and looping engine sound are included.
-10. The engine loop changes pitch and volume with vehicle speed.
+- The Car Rapide starts stationary with its engine off.
+- **E** opens the actual `Porte_avant_gauche` object already contained in the Car Rapide FBX. No fake procedural door is created.
+- **E** again moves the driver to the seat while the camera approaches the cabin.
+- **R** starts the engine; controls stay disabled before that.
+- The camera then moves progressively behind the vehicle.
+- A receiver/apprentice is attached to the rear platform.
+- Start and driving engine sounds are generated at runtime.
+- The driver/receiver layout is derived from the actual vehicle bounds instead of fixed world positions.
 
-The interaction system is attached automatically at runtime to the playable `VehicleController`, so the existing scene does not need manual component wiring.
+## Fix character appearance
 
-## Optional realistic characters — free
+The VALID FBX files embed their textures/materials. Unity can import them as plain white if they are not extracted.
 
-The prototype works immediately with procedural placeholder characters.
+In Unity use:
 
-For the more realistic first version requested for the PR:
+`Car Rapide > Vehicle > Download / Fix Driver & Receiver`
 
-1. Open Unity `6000.6.1f1`.
-2. Use **Car Rapide > Vehicle > Download Free Driver & Receiver**.
-3. Accept the download.
-4. Wait for Unity to import and configure both FBX files as Humanoid rigs.
-5. Open `Assets/Scenes/SampleScene.unity`.
-6. Press **Play**.
+or, if the FBX files already exist:
 
-The downloader uses two fully rigged Black male avatars from Google's/UCF's VALID avatar library. They are MIT licensed and have embedded materials/textures.
+`Car Rapide > Vehicle > Fix Existing Character Materials`
+
+Then reopen `SampleScene` and press Play.
 
 ## Controls
 
-- **E**: open the door / enter the vehicle
-- **R**: start the engine
-- **W / Up**: accelerate after engine start
+- **E**: open real driver door / enter
+- **R**: start engine
+- **W / Up**: accelerate after start
 - **S / Down**: brake then reverse
 - **A / D**: steer
 - **Space**: handbrake
-
-## PR demo checklist
-
-Record a short clip showing:
-
-- engine off at the beginning;
-- the door opening;
-- driver entering;
-- close cabin camera;
-- engine start;
-- rear driving camera;
-- vehicle controls working only after engine start;
-- apprentice visible on the rear platform;
-- audible engine loop while driving.

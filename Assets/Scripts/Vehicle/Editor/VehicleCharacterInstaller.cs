@@ -2,7 +2,6 @@
 using System;
 using System.IO;
 using System.Net.Http;
-using System.Threading.Tasks;
 using UnityEditor;
 using UnityEngine;
 
@@ -24,13 +23,13 @@ namespace CarRapide.EditorTools
                 CharacterFolder + "/Black_M_2_Casual.fbx")
         };
 
-        [MenuItem("Car Rapide/Vehicle/Download Free Driver & Receiver")]
-        public static async void DownloadFreeCharacters()
+        [MenuItem("Car Rapide/Vehicle/Download / Fix Driver & Receiver")]
+        public static async void DownloadAndFixCharacters()
         {
             bool confirmed = EditorUtility.DisplayDialog(
                 "Car Rapide — personnages",
-                "Télécharger deux avatars masculins noirs, riggés et gratuits depuis la VALID Avatar Library (MIT) ?\n\nIls serviront de première version réaliste du chauffeur et de l'apprenti.",
-                "Télécharger",
+                "Télécharger si nécessaire puis reconfigurer les deux avatars VALID avec textures, matériaux et rig Humanoid ?",
+                "Continuer",
                 "Annuler");
 
             if (!confirmed)
@@ -46,14 +45,15 @@ namespace CarRapide.EditorTools
                 {
                     Timeout = TimeSpan.FromMinutes(2)
                 };
-                client.DefaultRequestHeaders.UserAgent.ParseAdd("CarRapideGame/1.0");
+                client.DefaultRequestHeaders.UserAgent.ParseAdd("CarRapideGame/1.1");
 
                 for (int i = 0; i < Characters.Length; i++)
                 {
                     DownloadItem item = Characters[i];
+
                     EditorUtility.DisplayProgressBar(
                         "Car Rapide — personnages",
-                        $"Téléchargement : {item.Label} ({i + 1}/{Characters.Length})",
+                        $"Préparation : {item.Label} ({i + 1}/{Characters.Length})",
                         (i + 0.2f) / Characters.Length);
 
                     if (!File.Exists(item.AssetPath))
@@ -67,7 +67,7 @@ namespace CarRapide.EditorTools
 
                 foreach (DownloadItem item in Characters)
                 {
-                    ConfigureHumanoid(item.AssetPath);
+                    ConfigureHumanoidAndMaterials(item.AssetPath);
                 }
 
                 AssetDatabase.SaveAssets();
@@ -76,7 +76,7 @@ namespace CarRapide.EditorTools
                 EditorUtility.ClearProgressBar();
                 EditorUtility.DisplayDialog(
                     "Car Rapide — personnages",
-                    "Terminé. Les personnages sont prêts. Ouvre SampleScene et appuie sur Play.",
+                    "Terminé. Les personnages ont été réimportés avec leurs textures et le rig Humanoid.",
                     "OK");
             }
             catch (Exception exception)
@@ -90,17 +90,34 @@ namespace CarRapide.EditorTools
             }
         }
 
-        [MenuItem("Car Rapide/Vehicle/Open Character Folder")]
-        public static void OpenCharacterFolder()
+        [MenuItem("Car Rapide/Vehicle/Fix Existing Character Materials")]
+        public static void FixExistingCharacters()
         {
-            Directory.CreateDirectory(CharacterFolder);
+            int fixedCount = 0;
+
+            foreach (DownloadItem item in Characters)
+            {
+                if (!File.Exists(item.AssetPath))
+                {
+                    continue;
+                }
+
+                ConfigureHumanoidAndMaterials(item.AssetPath);
+                fixedCount++;
+            }
+
+            AssetDatabase.SaveAssets();
             AssetDatabase.Refresh();
-            UnityEngine.Object folder = AssetDatabase.LoadAssetAtPath<UnityEngine.Object>(CharacterFolder);
-            Selection.activeObject = folder;
-            EditorGUIUtility.PingObject(folder);
+
+            EditorUtility.DisplayDialog(
+                "Car Rapide — personnages",
+                fixedCount == 0
+                    ? "Aucun FBX trouvé. Utilise d'abord Download / Fix Driver & Receiver."
+                    : $"{fixedCount} personnage(s) réimporté(s) avec textures et rig Humanoid.",
+                "OK");
         }
 
-        private static void ConfigureHumanoid(string assetPath)
+        private static void ConfigureHumanoidAndMaterials(string assetPath)
         {
             AssetDatabase.ImportAsset(assetPath, ImportAssetOptions.ForceUpdate);
 
@@ -112,6 +129,10 @@ namespace CarRapide.EditorTools
             importer.animationType = ModelImporterAnimationType.Human;
             importer.avatarSetup = ModelImporterAvatarSetup.CreateFromThisModel;
             importer.optimizeGameObjects = false;
+            importer.materialImportMode = ModelImporterMaterialImportMode.ImportStandard;
+            importer.materialLocation = ModelImporterMaterialLocation.External;
+            importer.materialName = ModelImporterMaterialName.BasedOnMaterialName;
+            importer.materialSearch = ModelImporterMaterialSearch.Local;
             importer.SaveAndReimport();
         }
 
