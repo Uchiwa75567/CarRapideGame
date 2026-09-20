@@ -44,8 +44,11 @@ namespace CarRapide.Vehicle
         private Vector3 driverSeatHipsPosition;
         private Vector3 receiverFeetPosition;
         private Vector3 exteriorCameraOffset;
+        private Vector3 exteriorCameraLookPoint;
         private Vector3 cabinCameraOffset;
+        private Vector3 cabinCameraLookPoint;
         private Vector3 drivingCameraOffset;
+        private Vector3 drivingCameraLookPoint;
         private float driverSideSign = -1f;
         private float vehicleFrontSign = 1f;
 
@@ -79,7 +82,7 @@ namespace CarRapide.Vehicle
             if (cameraFollow != null)
             {
                 cameraFollow.SetTarget(transform);
-                cameraFollow.SetView(exteriorCameraOffset, vehicleBoundsLocal.size.y * 0.55f, 0.2f);
+                cameraFollow.SetView(exteriorCameraOffset, exteriorCameraLookPoint, 0.28f);
             }
 
             BuildCharacters();
@@ -126,12 +129,26 @@ namespace CarRapide.Vehicle
 
         private void CalculateVehicleBounds()
         {
+            BoxCollider vehicleBox = GetComponent<BoxCollider>();
+            if (vehicleBox != null)
+            {
+                Vector3 absScale = new Vector3(
+                    Mathf.Abs(transform.localScale.x),
+                    Mathf.Abs(transform.localScale.y),
+                    Mathf.Abs(transform.localScale.z));
+
+                Vector3 size = Vector3.Scale(vehicleBox.size, absScale);
+                Vector3 center = Vector3.Scale(vehicleBox.center, absScale);
+                vehicleBoundsLocal = new Bounds(center, size);
+                return;
+            }
+
             Transform modelRoot = FindDeepChild(transform, "Car rapide") ?? transform;
             Renderer[] renderers = modelRoot.GetComponentsInChildren<Renderer>(true);
 
             if (renderers.Length == 0)
             {
-                vehicleBoundsLocal = new Bounds(Vector3.zero, new Vector3(1.6f, 2.1f, 3.8f));
+                vehicleBoundsLocal = new Bounds(Vector3.zero, new Vector3(1.55f, 2.45f, 3.65f));
                 return;
             }
 
@@ -166,33 +183,37 @@ namespace CarRapide.Vehicle
 
             Vector3 doorCenter = driverDoorBoundsLocal.size.sqrMagnitude > 0.001f
                 ? driverDoorBoundsLocal.center
-                : new Vector3(vehicleBoundsLocal.min.x, vehicleBoundsLocal.center.y, vehicleBoundsLocal.center.z + length * 0.28f);
+                : new Vector3(vehicleBoundsLocal.min.x, vehicleBoundsLocal.center.y, vehicleBoundsLocal.center.z);
 
             driverSideSign = doorCenter.x >= vehicleBoundsLocal.center.x ? 1f : -1f;
 
-            float distanceToMinZ = Mathf.Abs(doorCenter.z - vehicleBoundsLocal.min.z);
-            float distanceToMaxZ = Mathf.Abs(vehicleBoundsLocal.max.z - doorCenter.z);
-            vehicleFrontSign = distanceToMaxZ < distanceToMinZ ? 1f : -1f;
+            Bounds steeringBounds;
+            bool hasSteeringWheel = TryFindNamedBounds("Volant", out steeringBounds);
+            Vector3 steeringCenter = hasSteeringWheel
+                ? steeringBounds.center
+                : doorCenter + new Vector3(-driverSideSign * width * 0.18f, height * 0.03f, length * 0.16f);
 
-            float groundY = vehicleBoundsLocal.min.y;
+            vehicleFrontSign = steeringCenter.z >= vehicleBoundsLocal.center.z ? 1f : -1f;
+
+            float groundY = vehicleBoundsLocal.min.y + height * 0.025f;
+            float stepY = groundY + height * 0.105f;
+
             float outsideX = driverSideSign > 0f
-                ? vehicleBoundsLocal.max.x + Mathf.Max(0.32f, width * 0.17f)
-                : vehicleBoundsLocal.min.x - Mathf.Max(0.32f, width * 0.17f);
+                ? driverDoorBoundsLocal.max.x + width * 0.28f
+                : driverDoorBoundsLocal.min.x - width * 0.28f;
 
             float doorX = driverSideSign > 0f
-                ? driverDoorBoundsLocal.max.x + 0.06f
-                : driverDoorBoundsLocal.min.x - 0.06f;
+                ? driverDoorBoundsLocal.max.x + width * 0.055f
+                : driverDoorBoundsLocal.min.x - width * 0.055f;
 
             float insideX = driverSideSign > 0f
-                ? driverDoorBoundsLocal.min.x - width * 0.10f
-                : driverDoorBoundsLocal.max.x + width * 0.10f;
-
-            float doorwayStepY = Mathf.Max(groundY, driverDoorBoundsLocal.min.y + driverDoorBoundsLocal.size.y * 0.05f);
+                ? driverDoorBoundsLocal.min.x - width * 0.06f
+                : driverDoorBoundsLocal.max.x + width * 0.06f;
 
             driverOutsideFeetPosition = new Vector3(
                 outsideX,
                 groundY,
-                doorCenter.z - vehicleFrontSign * length * 0.02f);
+                doorCenter.z - vehicleFrontSign * length * 0.015f);
 
             driverDoorFeetPosition = new Vector3(
                 doorX,
@@ -201,22 +222,25 @@ namespace CarRapide.Vehicle
 
             driverInsideFeetPosition = new Vector3(
                 insideX,
-                doorwayStepY,
-                doorCenter.z - vehicleFrontSign * length * 0.055f);
+                stepY,
+                doorCenter.z - vehicleFrontSign * length * 0.07f);
 
-            driverSeatHipsPosition = new Vector3(
-                vehicleBoundsLocal.center.x + driverSideSign * width * 0.17f,
-                driverDoorBoundsLocal.min.y + driverDoorBoundsLocal.size.y * 0.54f,
-                doorCenter.z - vehicleFrontSign * length * 0.09f);
+            // Seat is derived from the real steering wheel, so the driver ends up
+            // behind the wheel instead of being guessed from the vehicle roof/door.
+            driverSeatHipsPosition = steeringCenter + new Vector3(
+                0f,
+                -height * 0.18f,
+                -vehicleFrontSign * length * 0.115f);
 
             Bounds rearDoorBounds;
             if (TryFindNamedBounds("Porte_arriere", out rearDoorBounds))
             {
                 float rearSign = rearDoorBounds.center.z >= vehicleBoundsLocal.center.z ? 1f : -1f;
+
                 receiverFeetPosition = new Vector3(
-                    rearDoorBounds.center.x - driverSideSign * width * 0.16f,
-                    rearDoorBounds.min.y + 0.025f,
-                    rearDoorBounds.center.z + rearSign * Mathf.Max(0.10f, rearDoorBounds.size.z * 0.55f));
+                    vehicleBoundsLocal.center.x - driverSideSign * width * 0.12f,
+                    groundY + height * 0.105f,
+                    rearDoorBounds.center.z + rearSign * Mathf.Max(0.08f, length * 0.025f));
             }
             else
             {
@@ -225,25 +249,51 @@ namespace CarRapide.Vehicle
                     : vehicleBoundsLocal.max.z + length * 0.025f;
 
                 receiverFeetPosition = new Vector3(
-                    vehicleBoundsLocal.center.x - driverSideSign * width * 0.18f,
-                    groundY + height * 0.08f,
+                    vehicleBoundsLocal.center.x - driverSideSign * width * 0.12f,
+                    groundY + height * 0.105f,
                     rearZ);
             }
 
+            // Exterior camera: close enough to actually see the driver + door interaction.
             exteriorCameraOffset = new Vector3(
-                driverSideSign * Mathf.Max(3.2f, width * 2.0f),
-                Mathf.Max(2.0f, height * 0.95f),
-                doorCenter.z + vehicleFrontSign * length * 0.08f);
+                doorCenter.x + driverSideSign * Mathf.Max(1.55f, width * 1.10f),
+                groundY + Mathf.Max(1.55f, height * 0.68f),
+                doorCenter.z - vehicleFrontSign * length * 0.12f);
 
-            cabinCameraOffset = new Vector3(
-                driverSideSign * Mathf.Max(1.05f, width * 0.72f),
-                groundY + height * 0.70f,
-                doorCenter.z - vehicleFrontSign * length * 0.02f);
-
-            drivingCameraOffset = new Vector3(
+            exteriorCameraLookPoint = doorCenter + new Vector3(
                 0f,
-                Mathf.Max(3.6f, height * 1.55f),
-                -vehicleFrontSign * Mathf.Max(6.6f, length * 1.55f));
+                driverDoorBoundsLocal.size.y * 0.08f,
+                -vehicleFrontSign * length * 0.03f);
+
+            // Cabin camera sits just outside/above the driver's shoulder and looks
+            // toward the real steering wheel/seat.
+            cabinCameraOffset = steeringCenter + new Vector3(
+                driverSideSign * Mathf.Max(0.72f, width * 0.48f),
+                height * 0.12f,
+                -vehicleFrontSign * length * 0.10f);
+
+            cabinCameraLookPoint = Vector3.Lerp(
+                steeringCenter,
+                driverSeatHipsPosition + Vector3.up * height * 0.18f,
+                0.45f);
+
+            // Third-person camera is deliberately closer than the previous prototype.
+            Vector3 vehicleCenter = vehicleBoundsLocal.center;
+            drivingCameraOffset = vehicleCenter + new Vector3(
+                0f,
+                Mathf.Max(2.15f, height * 0.92f),
+                -vehicleFrontSign * Mathf.Max(4.35f, length * 1.18f));
+
+            drivingCameraLookPoint = vehicleCenter + new Vector3(
+                0f,
+                height * 0.28f,
+                vehicleFrontSign * length * 0.18f);
+
+            CreateOrMoveAnchor("DriverOutsidePoint", driverOutsideFeetPosition);
+            CreateOrMoveAnchor("DriverDoorPoint", driverDoorFeetPosition);
+            CreateOrMoveAnchor("DriverStepPoint", driverInsideFeetPosition);
+            CreateOrMoveAnchor("DriverSeatPoint", driverSeatHipsPosition);
+            CreateOrMoveAnchor("ReceiverPlatformPoint", receiverFeetPosition);
         }
 
         private void SetupRealDriverDoor()
@@ -385,8 +435,8 @@ namespace CarRapide.Vehicle
             {
                 cameraFollow.SetView(
                     cabinCameraOffset,
-                    vehicleBoundsLocal.size.y * 0.60f,
-                    0.52f);
+                    cabinCameraLookPoint,
+                    0.58f);
             }
 
             float faceDoorYaw = driverSideSign < 0f ? 90f : -90f;
@@ -486,8 +536,8 @@ namespace CarRapide.Vehicle
             {
                 cameraFollow.SetView(
                     drivingCameraOffset,
-                    vehicleBoundsLocal.size.y * 0.55f,
-                    1.15f);
+                    drivingCameraLookPoint,
+                    1.05f);
             }
 
             state = ExperienceState.Driving;
@@ -544,21 +594,17 @@ namespace CarRapide.Vehicle
 
         private float CalculateRealisticCharacterHeight()
         {
-            float vehicleHeight = Mathf.Max(0.5f, vehicleBoundsLocal.size.y);
-            float vehicleWidth = Mathf.Max(0.5f, vehicleBoundsLocal.size.x);
-            float doorHeight = driverDoorBoundsLocal.size.y > 0.05f
-                ? driverDoorBoundsLocal.size.y
-                : vehicleHeight * 0.62f;
+            // Project units are meters. The vehicle collider is around minibus scale,
+            // so keep an adult driver around 1.55–1.66 m instead of deriving a giant
+            // character from roof-rack/render bounds.
+            float height = Mathf.Max(1f, vehicleBoundsLocal.size.y);
+            float width = Mathf.Max(0.5f, vehicleBoundsLocal.size.x);
 
-            float basedOnVehicle = vehicleHeight * 0.68f;
-            float basedOnWidth = vehicleWidth * 1.04f;
-            float basedOnDoor = doorHeight * 1.14f;
+            float fromVehicleHeight = height * 0.64f;
+            float fromVehicleWidth = width * 1.06f;
+            float target = Mathf.Min(fromVehicleHeight, fromVehicleWidth);
 
-            float target = Mathf.Min(basedOnVehicle, basedOnWidth, basedOnDoor);
-            float minimum = vehicleHeight * 0.50f;
-            float maximum = vehicleHeight * 0.70f;
-
-            return Mathf.Clamp(target, minimum, maximum);
+            return Mathf.Clamp(target, 1.52f, 1.66f);
         }
 
         private GameObject CreateCharacter(
@@ -678,9 +724,12 @@ namespace CarRapide.Vehicle
 
             for (float time = 0f; time < duration; time += Time.deltaTime)
             {
-                float t = Mathf.SmoothStep(0f, 1f, time / duration);
+                float raw = Mathf.Clamp01(time / duration);
+                float t = raw * raw * raw * (raw * (raw * 6f - 15f) + 10f);
+
                 Vector3 position = Vector3.Lerp(startPosition, targetRoot, t);
-                position.y += Mathf.Sin(t * Mathf.PI) * stepArcHeight;
+                position.y += Mathf.Sin(raw * Mathf.PI) * stepArcHeight;
+
                 character.localPosition = position;
                 character.localRotation = Quaternion.Slerp(startRotation, targetRotation, t);
                 yield return null;
@@ -704,9 +753,12 @@ namespace CarRapide.Vehicle
 
             for (float time = 0f; time < duration; time += Time.deltaTime)
             {
-                float t = Mathf.SmoothStep(0f, 1f, time / duration);
+                float raw = Mathf.Clamp01(time / duration);
+                float t = raw * raw * raw * (raw * (raw * 6f - 15f) + 10f);
+
                 Vector3 position = Vector3.Lerp(startPosition, targetRoot, t);
-                position.y += Mathf.Sin(t * Mathf.PI) * 0.025f;
+                position.y += Mathf.Sin(raw * Mathf.PI) * 0.018f;
+
                 character.localPosition = position;
                 character.localRotation = Quaternion.Slerp(startRotation, targetRotation, t);
                 yield return null;
@@ -789,80 +841,18 @@ namespace CarRapide.Vehicle
             return clip;
         }
 
-        private static void TryApplyStandingPose(GameObject character, bool receiverPose)
+        private void CreateOrMoveAnchor(string anchorName, Vector3 localPosition)
         {
-            Animator animator = character.GetComponentInChildren<Animator>();
-            if (animator == null || animator.avatar == null || !animator.avatar.isHuman)
+            Transform existing = FindDeepChild(transform, anchorName);
+            if (existing == null)
             {
-                return;
+                GameObject anchor = new GameObject(anchorName);
+                existing = anchor.transform;
+                existing.SetParent(transform, false);
             }
 
-            try
-            {
-                HumanPoseHandler handler = new HumanPoseHandler(animator.avatar, animator.transform);
-                HumanPose pose = new HumanPose { muscles = new float[HumanTrait.MuscleCount] };
-                handler.GetHumanPose(ref pose);
-
-                SetMuscle(ref pose, "Left Arm Down-Up", -0.88f);
-                SetMuscle(ref pose, "Right Arm Down-Up", receiverPose ? 0.55f : -0.88f);
-                SetMuscle(ref pose, "Left Arm Front-Back", 0.02f);
-                SetMuscle(ref pose, "Right Arm Front-Back", receiverPose ? -0.18f : 0.02f);
-                SetMuscle(ref pose, "Right Forearm Stretch", receiverPose ? -0.38f : 0f);
-
-                handler.SetHumanPose(ref pose);
-                handler.Dispose();
-            }
-            catch (Exception exception)
-            {
-                Debug.LogWarning($"Pose personnage non appliquée: {exception.Message}");
-            }
-        }
-
-        private static void TryApplySeatedPose(GameObject character)
-        {
-            Animator animator = character.GetComponentInChildren<Animator>();
-            if (animator == null || animator.avatar == null || !animator.avatar.isHuman)
-            {
-                return;
-            }
-
-            try
-            {
-                HumanPoseHandler handler = new HumanPoseHandler(animator.avatar, animator.transform);
-                HumanPose pose = new HumanPose { muscles = new float[HumanTrait.MuscleCount] };
-                handler.GetHumanPose(ref pose);
-
-                SetMuscle(ref pose, "Left Upper Leg Front-Back", -0.72f);
-                SetMuscle(ref pose, "Right Upper Leg Front-Back", -0.72f);
-                SetMuscle(ref pose, "Left Knee Stretch", -0.88f);
-                SetMuscle(ref pose, "Right Knee Stretch", -0.88f);
-                SetMuscle(ref pose, "Left Arm Down-Up", -0.50f);
-                SetMuscle(ref pose, "Right Arm Down-Up", -0.50f);
-                SetMuscle(ref pose, "Left Arm Front-Back", -0.34f);
-                SetMuscle(ref pose, "Right Arm Front-Back", -0.34f);
-                SetMuscle(ref pose, "Left Forearm Stretch", -0.55f);
-                SetMuscle(ref pose, "Right Forearm Stretch", -0.55f);
-
-                handler.SetHumanPose(ref pose);
-                handler.Dispose();
-            }
-            catch (Exception exception)
-            {
-                Debug.LogWarning($"Pose chauffeur non appliquée: {exception.Message}");
-            }
-        }
-
-        private static void SetMuscle(ref HumanPose pose, string muscleName, float value)
-        {
-            string[] names = HumanTrait.MuscleName;
-            for (int i = 0; i < names.Length; i++)
-            {
-                if (names[i] == muscleName)
-                {
-                    pose.muscles[i] = Mathf.Clamp(value, -1f, 1f);
-                    return;
-                }
-            }
+            existing.localPosition = localPosition;
+            existing.localRotation = Quaternion.identity;
         }
 
         private bool TryFindNamedBounds(string prefix, out Bounds localBounds)

@@ -12,19 +12,19 @@ namespace CarRapide.Vehicle
 
         private Vector3 positionVelocity;
         private Vector3 viewOffsetVelocity;
-        private float lookHeightVelocity;
+        private Vector3 lookPointVelocity;
         private Vector3 currentViewOffset;
         private Vector3 targetViewOffset;
-        private float currentLookHeight;
-        private float targetLookHeight;
+        private Vector3 currentLookLocalPoint;
+        private Vector3 targetLookLocalPoint;
         private float viewTransitionTime = 0.2f;
 
         private void Awake()
         {
             currentViewOffset = localOffset;
             targetViewOffset = localOffset;
-            currentLookHeight = lookHeight;
-            targetLookHeight = lookHeight;
+            currentLookLocalPoint = new Vector3(0f, lookHeight, 0f);
+            targetLookLocalPoint = currentLookLocalPoint;
         }
 
         public void SetTarget(Transform newTarget)
@@ -35,8 +35,13 @@ namespace CarRapide.Vehicle
 
         public void SetView(Vector3 newLocalOffset, float newLookHeight, float transitionSeconds = 0.5f)
         {
+            SetView(newLocalOffset, new Vector3(0f, newLookHeight, 0f), transitionSeconds);
+        }
+
+        public void SetView(Vector3 newLocalOffset, Vector3 newLookLocalPoint, float transitionSeconds = 0.5f)
+        {
             targetViewOffset = newLocalOffset;
-            targetLookHeight = newLookHeight;
+            targetLookLocalPoint = newLookLocalPoint;
             viewTransitionTime = Mathf.Max(0.01f, transitionSeconds);
         }
 
@@ -53,10 +58,10 @@ namespace CarRapide.Vehicle
                 ref viewOffsetVelocity,
                 viewTransitionTime);
 
-            currentLookHeight = Mathf.SmoothDamp(
-                currentLookHeight,
-                targetLookHeight,
-                ref lookHeightVelocity,
+            currentLookLocalPoint = Vector3.SmoothDamp(
+                currentLookLocalPoint,
+                targetLookLocalPoint,
+                ref lookPointVelocity,
                 viewTransitionTime);
 
             Vector3 desiredPosition = target.TransformPoint(currentViewOffset);
@@ -67,7 +72,7 @@ namespace CarRapide.Vehicle
                 ref positionVelocity,
                 positionSmoothTime);
 
-            Vector3 lookPoint = target.position + Vector3.up * currentLookHeight;
+            Vector3 lookPoint = target.TransformPoint(currentLookLocalPoint);
             Vector3 lookDirection = lookPoint - transform.position;
 
             if (lookDirection.sqrMagnitude <= 0.001f)
