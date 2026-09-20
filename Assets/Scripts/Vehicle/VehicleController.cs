@@ -30,6 +30,8 @@ namespace CarRapide.Vehicle
         private Vector2 moveInput;
         private bool handbrakePressed;
 
+        public bool CanDrive { get; set; } = true;
+
         public float SpeedKmh
         {
             get
@@ -47,6 +49,7 @@ namespace CarRapide.Vehicle
         {
             vehicleRigidbody = GetComponent<Rigidbody>();
             vehicleRigidbody.interpolation = RigidbodyInterpolation.Interpolate;
+            vehicleRigidbody.collisionDetectionMode = CollisionDetectionMode.ContinuousDynamic;
 
             if (lockPitchAndRoll)
             {
@@ -57,8 +60,8 @@ namespace CarRapide.Vehicle
 
         private void Update()
         {
-            moveInput = ReadMoveInput();
-            handbrakePressed = ReadHandbrake();
+            moveInput = CanDrive ? ReadMoveInput() : Vector2.zero;
+            handbrakePressed = !CanDrive || ReadHandbrake();
         }
 
         private void FixedUpdate()

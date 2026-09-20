@@ -11,11 +11,33 @@ namespace CarRapide.Vehicle
         [SerializeField] private float lookHeight = 1.2f;
 
         private Vector3 positionVelocity;
+        private Vector3 viewOffsetVelocity;
+        private float lookHeightVelocity;
+        private Vector3 currentViewOffset;
+        private Vector3 targetViewOffset;
+        private float currentLookHeight;
+        private float targetLookHeight;
+        private float viewTransitionTime = 0.2f;
+
+        private void Awake()
+        {
+            currentViewOffset = localOffset;
+            targetViewOffset = localOffset;
+            currentLookHeight = lookHeight;
+            targetLookHeight = lookHeight;
+        }
 
         public void SetTarget(Transform newTarget)
         {
             target = newTarget;
             positionVelocity = Vector3.zero;
+        }
+
+        public void SetView(Vector3 newLocalOffset, float newLookHeight, float transitionSeconds = 0.5f)
+        {
+            targetViewOffset = newLocalOffset;
+            targetLookHeight = newLookHeight;
+            viewTransitionTime = Mathf.Max(0.01f, transitionSeconds);
         }
 
         private void LateUpdate()
@@ -25,7 +47,19 @@ namespace CarRapide.Vehicle
                 return;
             }
 
-            Vector3 desiredPosition = target.TransformPoint(localOffset);
+            currentViewOffset = Vector3.SmoothDamp(
+                currentViewOffset,
+                targetViewOffset,
+                ref viewOffsetVelocity,
+                viewTransitionTime);
+
+            currentLookHeight = Mathf.SmoothDamp(
+                currentLookHeight,
+                targetLookHeight,
+                ref lookHeightVelocity,
+                viewTransitionTime);
+
+            Vector3 desiredPosition = target.TransformPoint(currentViewOffset);
 
             transform.position = Vector3.SmoothDamp(
                 transform.position,
@@ -33,7 +67,7 @@ namespace CarRapide.Vehicle
                 ref positionVelocity,
                 positionSmoothTime);
 
-            Vector3 lookPoint = target.position + Vector3.up * lookHeight;
+            Vector3 lookPoint = target.position + Vector3.up * currentLookHeight;
             Vector3 lookDirection = lookPoint - transform.position;
 
             if (lookDirection.sqrMagnitude <= 0.001f)
