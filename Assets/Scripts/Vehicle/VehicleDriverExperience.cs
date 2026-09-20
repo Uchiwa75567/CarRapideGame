@@ -30,6 +30,8 @@ namespace CarRapide.Vehicle
         private VehicleCameraFollow cameraFollow;
         private Transform doorPivot;
         private Transform driverCharacter;
+        private VehicleHumanoidMotion driverMotion;
+        private VehicleHumanoidMotion receiverMotion;
         private AudioSource engineStartSource;
         private AudioSource engineLoopSource;
         private ExperienceState state;
@@ -109,11 +111,16 @@ namespace CarRapide.Vehicle
                 }
             }
 
+            float normalizedVehicleSpeed = Mathf.InverseLerp(0f, 70f, vehicleController.SpeedKmh);
+            if (receiverMotion != null)
+            {
+                receiverMotion.SetVehicleSpeed(normalizedVehicleSpeed);
+            }
+
             if (state == ExperienceState.Driving && engineLoopSource != null)
             {
-                float normalizedSpeed = Mathf.InverseLerp(0f, 70f, vehicleController.SpeedKmh);
-                engineLoopSource.pitch = Mathf.Lerp(0.82f, 1.42f, normalizedSpeed);
-                engineLoopSource.volume = Mathf.Lerp(0.11f, 0.24f, normalizedSpeed);
+                engineLoopSource.pitch = Mathf.Lerp(0.82f, 1.42f, normalizedVehicleSpeed);
+                engineLoopSource.volume = Mathf.Lerp(0.11f, 0.24f, normalizedVehicleSpeed);
             }
         }
 
@@ -180,23 +187,48 @@ namespace CarRapide.Vehicle
                 ? driverDoorBoundsLocal.min.x - width * 0.10f
                 : driverDoorBoundsLocal.max.x + width * 0.10f;
 
-            driverOutsideFeetPosition = new Vector3(outsideX, groundY, doorCenter.z);
-            driverDoorFeetPosition = new Vector3(doorX, groundY, doorCenter.z);
-            driverInsideFeetPosition = new Vector3(insideX, groundY + height * 0.06f, doorCenter.z - vehicleFrontSign * length * 0.035f);
+            float doorwayStepY = Mathf.Max(groundY, driverDoorBoundsLocal.min.y + driverDoorBoundsLocal.size.y * 0.05f);
+
+            driverOutsideFeetPosition = new Vector3(
+                outsideX,
+                groundY,
+                doorCenter.z - vehicleFrontSign * length * 0.02f);
+
+            driverDoorFeetPosition = new Vector3(
+                doorX,
+                groundY,
+                doorCenter.z);
+
+            driverInsideFeetPosition = new Vector3(
+                insideX,
+                doorwayStepY,
+                doorCenter.z - vehicleFrontSign * length * 0.055f);
 
             driverSeatHipsPosition = new Vector3(
-                vehicleBoundsLocal.center.x + driverSideSign * width * 0.18f,
-                groundY + height * 0.39f,
-                doorCenter.z - vehicleFrontSign * length * 0.12f);
+                vehicleBoundsLocal.center.x + driverSideSign * width * 0.17f,
+                driverDoorBoundsLocal.min.y + driverDoorBoundsLocal.size.y * 0.54f,
+                doorCenter.z - vehicleFrontSign * length * 0.09f);
 
-            float rearZ = vehicleFrontSign > 0f
-                ? vehicleBoundsLocal.min.z - length * 0.025f
-                : vehicleBoundsLocal.max.z + length * 0.025f;
+            Bounds rearDoorBounds;
+            if (TryFindNamedBounds("Porte_arriere", out rearDoorBounds))
+            {
+                float rearSign = rearDoorBounds.center.z >= vehicleBoundsLocal.center.z ? 1f : -1f;
+                receiverFeetPosition = new Vector3(
+                    rearDoorBounds.center.x - driverSideSign * width * 0.16f,
+                    rearDoorBounds.min.y + 0.025f,
+                    rearDoorBounds.center.z + rearSign * Mathf.Max(0.10f, rearDoorBounds.size.z * 0.55f));
+            }
+            else
+            {
+                float rearZ = vehicleFrontSign > 0f
+                    ? vehicleBoundsLocal.min.z - length * 0.025f
+                    : vehicleBoundsLocal.max.z + length * 0.025f;
 
-            receiverFeetPosition = new Vector3(
-                vehicleBoundsLocal.center.x - driverSideSign * width * 0.22f,
-                groundY + height * 0.16f,
-                rearZ);
+                receiverFeetPosition = new Vector3(
+                    vehicleBoundsLocal.center.x - driverSideSign * width * 0.18f,
+                    groundY + height * 0.08f,
+                    rearZ);
+            }
 
             exteriorCameraOffset = new Vector3(
                 driverSideSign * Mathf.Max(3.2f, width * 2.0f),
@@ -312,6 +344,11 @@ namespace CarRapide.Vehicle
 
             state = ExperienceState.DoorOpening;
 
+            if (driverMotion != null)
+            {
+                driverMotion.SetMode(VehicleHumanoidMotion.MotionMode.ReachDoor, 0.18f);
+            }
+
             Quaternion start = doorPivot.localRotation;
             float openAngle = -72f * driverSideSign * vehicleFrontSign;
             Quaternion target = Quaternion.Euler(0f, openAngle, 0f);
@@ -325,6 +362,12 @@ namespace CarRapide.Vehicle
             }
 
             doorPivot.localRotation = target;
+
+            if (driverMotion != null)
+            {
+                driverMotion.SetMode(VehicleHumanoidMotion.MotionMode.Idle, 0.22f);
+            }
+
             state = ExperienceState.DoorOpen;
         }
 
@@ -343,27 +386,40 @@ namespace CarRapide.Vehicle
                 cameraFollow.SetView(
                     cabinCameraOffset,
                     vehicleBoundsLocal.size.y * 0.60f,
-                    0.40f);
+                    0.52f);
             }
 
             float faceDoorYaw = driverSideSign < 0f ? 90f : -90f;
             Quaternion faceDoorRotation = Quaternion.Euler(0f, faceDoorYaw, 0f);
 
-            TryApplyStandingPose(driverCharacter.gameObject, false);
+            if (driverMotion != null)
+            {
+                driverMotion.SetMode(VehicleHumanoidMotion.MotionMode.Walk, 0.15f);
+            }
 
             yield return MoveCharacterFeet(
                 driverCharacter,
                 driverDoorFeetPosition,
                 faceDoorRotation,
-                0.45f);
+                0.72f,
+                0.035f);
+
+            if (driverMotion != null)
+            {
+                driverMotion.SetMode(VehicleHumanoidMotion.MotionMode.StepIntoVehicle, 0.16f);
+            }
 
             yield return MoveCharacterFeet(
                 driverCharacter,
                 driverInsideFeetPosition,
                 faceDoorRotation,
-                0.42f);
+                0.70f,
+                0.075f);
 
-            TryApplySeatedPose(driverCharacter.gameObject);
+            if (driverMotion != null)
+            {
+                driverMotion.SetMode(VehicleHumanoidMotion.MotionMode.SitDown, 0.22f);
+            }
 
             float drivingYaw = vehicleFrontSign > 0f ? 0f : 180f;
             Quaternion seatRotation = Quaternion.Euler(0f, drivingYaw, 0f);
@@ -372,8 +428,14 @@ namespace CarRapide.Vehicle
                 driverCharacter,
                 driverSeatHipsPosition,
                 seatRotation,
-                0.48f);
+                0.78f);
 
+            if (driverMotion != null)
+            {
+                driverMotion.SetMode(VehicleHumanoidMotion.MotionMode.DriverSeated, 0.32f);
+            }
+
+            yield return new WaitForSeconds(0.12f);
             yield return CloseDoorRoutine();
             state = ExperienceState.Seated;
         }
@@ -433,6 +495,8 @@ namespace CarRapide.Vehicle
 
         private void BuildCharacters()
         {
+            float driverHeight = CalculateRealisticCharacterHeight();
+            float receiverHeight = driverHeight * 0.97f;
             float faceDoorYaw = driverSideSign < 0f ? 90f : -90f;
 
             GameObject driver = CreateCharacter(
@@ -440,12 +504,19 @@ namespace CarRapide.Vehicle
                 DriverResource,
                 Vector3.zero,
                 Quaternion.Euler(0f, faceDoorYaw, 0f),
-                1.72f);
+                driverHeight);
 
             if (driver != null)
             {
                 driverCharacter = driver.transform;
-                TryApplyStandingPose(driver, false);
+                driverMotion = driver.GetComponent<VehicleHumanoidMotion>();
+                if (driverMotion == null)
+                {
+                    driverMotion = driver.AddComponent<VehicleHumanoidMotion>();
+                }
+
+                driverMotion.SetRole(VehicleHumanoidMotion.CharacterRole.Driver);
+                driverMotion.SetMode(VehicleHumanoidMotion.MotionMode.Idle, 0.01f);
                 PlaceCharacterFeet(driverCharacter, driverOutsideFeetPosition);
             }
 
@@ -455,13 +526,39 @@ namespace CarRapide.Vehicle
                 ReceiverResource,
                 Vector3.zero,
                 Quaternion.Euler(0f, receiverYaw, 0f),
-                1.68f);
+                receiverHeight);
 
             if (receiver != null)
             {
-                TryApplyStandingPose(receiver, true);
+                receiverMotion = receiver.GetComponent<VehicleHumanoidMotion>();
+                if (receiverMotion == null)
+                {
+                    receiverMotion = receiver.AddComponent<VehicleHumanoidMotion>();
+                }
+
+                receiverMotion.SetRole(VehicleHumanoidMotion.CharacterRole.Receiver);
+                receiverMotion.SetMode(VehicleHumanoidMotion.MotionMode.ReceiverRide, 0.01f);
                 PlaceCharacterFeet(receiver.transform, receiverFeetPosition);
             }
+        }
+
+        private float CalculateRealisticCharacterHeight()
+        {
+            float vehicleHeight = Mathf.Max(0.5f, vehicleBoundsLocal.size.y);
+            float vehicleWidth = Mathf.Max(0.5f, vehicleBoundsLocal.size.x);
+            float doorHeight = driverDoorBoundsLocal.size.y > 0.05f
+                ? driverDoorBoundsLocal.size.y
+                : vehicleHeight * 0.62f;
+
+            float basedOnVehicle = vehicleHeight * 0.68f;
+            float basedOnWidth = vehicleWidth * 1.04f;
+            float basedOnDoor = doorHeight * 1.14f;
+
+            float target = Mathf.Min(basedOnVehicle, basedOnWidth, basedOnDoor);
+            float minimum = vehicleHeight * 0.50f;
+            float maximum = vehicleHeight * 0.70f;
+
+            return Mathf.Clamp(target, minimum, maximum);
         }
 
         private GameObject CreateCharacter(
@@ -570,7 +667,8 @@ namespace CarRapide.Vehicle
             Transform character,
             Vector3 targetFeetPosition,
             Quaternion targetRotation,
-            float duration)
+            float duration,
+            float stepArcHeight)
         {
             Vector3 startPosition = character.localPosition;
             Quaternion startRotation = character.localRotation;
@@ -581,7 +679,9 @@ namespace CarRapide.Vehicle
             for (float time = 0f; time < duration; time += Time.deltaTime)
             {
                 float t = Mathf.SmoothStep(0f, 1f, time / duration);
-                character.localPosition = Vector3.Lerp(startPosition, targetRoot, t);
+                Vector3 position = Vector3.Lerp(startPosition, targetRoot, t);
+                position.y += Mathf.Sin(t * Mathf.PI) * stepArcHeight;
+                character.localPosition = position;
                 character.localRotation = Quaternion.Slerp(startRotation, targetRotation, t);
                 yield return null;
             }
@@ -605,7 +705,9 @@ namespace CarRapide.Vehicle
             for (float time = 0f; time < duration; time += Time.deltaTime)
             {
                 float t = Mathf.SmoothStep(0f, 1f, time / duration);
-                character.localPosition = Vector3.Lerp(startPosition, targetRoot, t);
+                Vector3 position = Vector3.Lerp(startPosition, targetRoot, t);
+                position.y += Mathf.Sin(t * Mathf.PI) * 0.025f;
+                character.localPosition = position;
                 character.localRotation = Quaternion.Slerp(startRotation, targetRotation, t);
                 yield return null;
             }
@@ -761,6 +863,44 @@ namespace CarRapide.Vehicle
                     return;
                 }
             }
+        }
+
+        private bool TryFindNamedBounds(string prefix, out Bounds localBounds)
+        {
+            localBounds = default;
+            Transform modelRoot = FindDeepChild(transform, "Car rapide");
+            if (modelRoot == null)
+            {
+                return false;
+            }
+
+            bool initialized = false;
+            foreach (Transform item in modelRoot.GetComponentsInChildren<Transform>(true))
+            {
+                if (!item.name.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
+                {
+                    continue;
+                }
+
+                foreach (Renderer renderer in item.GetComponentsInChildren<Renderer>(true))
+                {
+                    foreach (Vector3 corner in BoundsCorners(renderer.bounds))
+                    {
+                        Vector3 local = transform.InverseTransformPoint(corner);
+                        if (!initialized)
+                        {
+                            localBounds = new Bounds(local, Vector3.zero);
+                            initialized = true;
+                        }
+                        else
+                        {
+                            localBounds.Encapsulate(local);
+                        }
+                    }
+                }
+            }
+
+            return initialized;
         }
 
         private static Transform FindDeepChild(Transform root, string exactName)
