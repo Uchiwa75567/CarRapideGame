@@ -29,8 +29,9 @@ namespace CarRapide.EditorTools
         private static readonly Vector2 Colobane = new Vector2(14.69512f, -17.44543f);
         private static readonly string[] OverpassEndpoints =
         {
-            "https://overpass-api.de/api/interpreter?data=",
-            "https://overpass.kumi.systems/api/interpreter?data="
+            "https://overpass.kumi.systems/api/interpreter",
+            "https://overpass-api.de/api/interpreter",
+            "https://overpass.nchc.org.tw/api/interpreter"
         };
 
         [MenuItem("Car Rapide/Dakar OSM/Build or Refresh Prototype")]
@@ -78,44 +79,109 @@ namespace CarRapide.EditorTools
 
         private static async Task<OsmResponse> DownloadData()
         {
-            string bbox = string.Format(CultureInfo.InvariantCulture, "{0},{1},{2},{3}", South, West, North, East);
-            string roads = "[out:json][timeout:90];(" +
-                           $"way[\"highway\"~\"^(primary|secondary|tertiary|residential|unclassified|service)$\"]({bbox});" +
-                           $"node[\"amenity\"=\"marketplace\"]({bbox});" +
-                           $"node[\"highway\"=\"bus_stop\"]({bbox});" +
-                           ");out tags geom qt;";
-            string buildings = "[out:json][timeout:90];" +
-                               $"way[\"building\"]({bbox});out tags geom qt 1200;";
+            using var client = new HttpClient { Timeout = TimeSpan.FromSeconds(75) };
+            client.DefaultRequestHeaders.UserAgent.ParseAdd("CarRapideGame-DakarPrototype/1.1");
 
-            using var client = new HttpClient { Timeout = TimeSpan.FromSeconds(120) };
-            client.DefaultRequestHeaders.UserAgent.ParseAdd("CarRapideGame-DakarPrototype/1.0");
+            // Découpe la zone en quatre tuiles pour réduire la charge de chaque requête Overpass.
+            double midLat = (South + North) * 0.5;
+            double midLon = (West + East) * 0.5;
+            (double south, double west, double north, double east)[] tiles =
+            {
+                (South, West, midLat, midLon),
+                (South, midLon, midLat, East),
+                (midLat, West, North, midLon),
+                (midLat, midLon, North, East)
+            };
 
-            OsmResponse a = await Download(client, roads);
-            OsmResponse b = await Download(client, buildings);
-            List<OsmElement> elements = new List<OsmElement>();
-            if (a?.elements != null) elements.AddRange(a.elements);
-            if (b?.elements != null) elements.AddRange(b.elements);
-            return new OsmResponse { elements = elements.ToArray() };
+            Dictionary<string, OsmElement> unique = new Dictionary<string, OsmElement>();
+
+            for (int i = 0; i < tiles.Length; i++)
+            {
+                var tile = tiles[i];
+                string bbox = string.Format(
+                    CultureInfo.InvariantCulture,
+                    "{0},{1},{2},{3}",
+                    tile.south, tile.west, tile.north, tile.east);
+
+                EditorUtility.DisplayProgressBar(
+                    "Dakar OSM",
+                    $"Téléchargement des routes ({i + 1}/{tiles.Length})...",
+                    0.05f + i * 0.06f);
+
+                string roads = "[out:json][timeout:45];(" +
+                               $"way[\"highway\"~\"^(primary|secondary|tertiary|residential|unclassified|service)$\"]({bbox});" +
+                               $"node[\"amenity\"=\"marketplace\"]({bbox});" +
+                               $"node[\"highway\"=\"bus_stop\"]({bbox});" +
+                               ");out tags geom qt;";
+
+                AddUnique(unique, await Download(client, roads));
+
+                EditorUtility.DisplayProgressBar(
+                    "Dakar OSM",
+                    $"Téléchargement des bâtiments ({i + 1}/{tiles.Length})...",
+                    0.30f + i * 0.06f);
+
+                string buildings = "[out:json][timeout:45];" +
+                                   $"way[\"building\"]({bbox});out tags geom qt 650;";
+
+                AddUnique(unique, await Download(client, buildings));
+            }
+
+            return new OsmResponse { elements = unique.Values.ToArray() };
+        }
+
+        private static void AddUnique(Dictionary<string, OsmElement> destination, OsmResponse response)
+        {
+            if (response?.elements == null) return;
+
+            foreach (OsmElement element in response.elements)
+            {
+                string key = $"{element.type}:{element.id}";
+                destination[key] = element;
+            }
         }
 
         private static async Task<OsmResponse> Download(HttpClient client, string query)
         {
             Exception last = null;
-            string encoded = Uri.EscapeDataString(query);
-            foreach (string endpoint in OverpassEndpoints)
+
+            for (int attempt = 1; attempt <= 2; attempt++)
             {
-                try
+                foreach (string endpoint in OverpassEndpoints)
                 {
-                    string json = await client.GetStringAsync(endpoint + encoded);
-                    return JsonUtility.FromJson<OsmResponse>(json);
+                    try
+                    {
+                        using var form = new FormUrlEncodedContent(
+                            new[] { new KeyValuePair<string, string>("data", query) });
+
+                        using HttpResponseMessage response = await client.PostAsync(endpoint, form);
+                        string json = await response.Content.ReadAsStringAsync();
+
+                        if (!response.IsSuccessStatusCode)
+                            throw new HttpRequestException(
+                                $"HTTP {(int)response.StatusCode} {response.ReasonPhrase}");
+
+                        OsmResponse parsed = JsonUtility.FromJson<OsmResponse>(json);
+                        if (parsed?.elements != null)
+                            return parsed;
+
+                        throw new InvalidOperationException("Réponse Overpass invalide.");
+                    }
+                    catch (Exception e)
+                    {
+                        last = e;
+                        Debug.LogWarning(
+                            $"Overpass indisponible (tentative {attempt}/2): {endpoint} ({e.Message})");
+                    }
                 }
-                catch (Exception e)
-                {
-                    last = e;
-                    Debug.LogWarning($"Overpass indisponible: {endpoint} ({e.Message})");
-                }
+
+                if (attempt < 2)
+                    await Task.Delay(1500);
             }
-            throw new InvalidOperationException("Impossible de télécharger OpenStreetMap via Overpass.", last);
+
+            throw new InvalidOperationException(
+                "Impossible de télécharger OpenStreetMap via Overpass après plusieurs tentatives. Vérifie ta connexion puis relance Car Rapide > Dakar OSM > Build or Refresh Prototype.",
+                last);
         }
 
         private static void BuildScene(OsmResponse data)
