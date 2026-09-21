@@ -30,7 +30,7 @@ namespace CarRapide.Vehicle
         private Vector2 moveInput;
         private bool handbrakePressed;
 
-        public bool CanDrive { get; set; } = true;
+        public bool CanDrive { get; set; }
 
         public float SpeedKmh
         {
@@ -66,12 +66,21 @@ namespace CarRapide.Vehicle
 
         private void FixedUpdate()
         {
+            // Gate physics too: input can remain cached between Update and FixedUpdate.
+            if (!CanDrive)
+            {
+                moveInput = Vector2.zero;
+                vehicleRigidbody.linearVelocity = new Vector3(0f, vehicleRigidbody.linearVelocity.y, 0f);
+                vehicleRigidbody.angularVelocity = Vector3.zero;
+                return;
+            }
             float forwardSpeed = Vector3.Dot(vehicleRigidbody.linearVelocity, transform.forward);
 
-            ApplyAccelerationAndBraking(forwardSpeed);
             ApplySteering(forwardSpeed);
             ApplyLateralGrip();
             ClampForwardSpeed();
+            // Apply velocity constraints before this step's acceleration and braking.
+            ApplyAccelerationAndBraking(forwardSpeed);
         }
 
         private void ApplyAccelerationAndBraking(float forwardSpeed)
@@ -93,7 +102,7 @@ namespace CarRapide.Vehicle
                 else if (forwardSpeed < maxForwardSpeed)
                 {
                     vehicleRigidbody.AddForce(
-                        transform.forward * (acceleration * throttle),
+                        transform.forward * Mathf.Min(acceleration * throttle, (maxForwardSpeed - forwardSpeed) / Time.fixedDeltaTime),
                         ForceMode.Acceleration);
                 }
 
@@ -111,7 +120,7 @@ namespace CarRapide.Vehicle
                 else if (forwardSpeed > -maxReverseSpeed)
                 {
                     vehicleRigidbody.AddForce(
-                        -transform.forward * (reverseAcceleration * reverseInput),
+                        -transform.forward * Mathf.Min(reverseAcceleration * reverseInput, (maxReverseSpeed + forwardSpeed) / Time.fixedDeltaTime),
                         ForceMode.Acceleration);
                 }
 
@@ -133,7 +142,7 @@ namespace CarRapide.Vehicle
             }
 
             vehicleRigidbody.AddForce(
-                -horizontalVelocity.normalized * deceleration,
+                -horizontalVelocity.normalized * Mathf.Min(deceleration, horizontalVelocity.magnitude / Time.fixedDeltaTime),
                 ForceMode.Acceleration);
         }
 

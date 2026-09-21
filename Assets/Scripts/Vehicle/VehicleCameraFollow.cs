@@ -33,6 +33,17 @@ namespace CarRapide.Vehicle
             positionVelocity = Vector3.zero;
         }
 
+        public void SetFollowDamping(float seconds) => positionSmoothTime = Mathf.Max(.01f, seconds);
+
+        public void SnapView(Vector3 offset, Vector3 look)
+        {
+            currentViewOffset = targetViewOffset = offset;
+            currentLookLocalPoint = targetLookLocalPoint = look;
+            positionVelocity = viewOffsetVelocity = lookPointVelocity = Vector3.zero;
+            transform.position = target.TransformPoint(offset);
+            transform.LookAt(target.TransformPoint(look));
+        }
+
         public void SetView(Vector3 newLocalOffset, float newLookHeight, float transitionSeconds = 0.5f)
         {
             SetView(newLocalOffset, new Vector3(0f, newLookHeight, 0f), transitionSeconds);
