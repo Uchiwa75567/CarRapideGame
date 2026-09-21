@@ -21,11 +21,20 @@ namespace CarRapide.EditorTools
         static readonly float[] audioSamples=new float[512];
         static float peakAudio;
         static MediaEncoder video;
+        static VehicleReviewAudioCapture recordedAudio;
+        static bool captureRateChanged;
         static int videoFrame, previousCaptureRate;
         static Keyboard keyboard;
         static Vector3 origin;
         static KeyboardState requestedInput;
         static string Folder => passengerReview ? "Library/VehicleReview/Passenger" : "Library/VehicleReview/Run";
+        [InitializeOnLoadMethod]
+        static void RegisterCleanup()
+        {
+            AssemblyReloadEvents.beforeAssemblyReload+=End;
+            EditorApplication.playModeStateChanged+=state =>
+            { if(state==PlayModeStateChange.ExitingPlayMode) End(); };
+        }
         [MenuItem("Car Rapide/Vehicle/Record 30 second Play Mode review")]
         public static void Begin()
         {
@@ -45,7 +54,7 @@ namespace CarRapide.EditorTools
             start=Time.time; nextCapture=0; frame=0; active=true; boarded=started=false;
             EditorApplication.update-=Tick; EditorApplication.update+=Tick;
         }
-        [MenuItem("Car Rapide/Vehicle/Record driver review with silent MP4")]
+        [MenuItem("Car Rapide/Vehicle/Record driver review with audio MP4")]
         public static void BeginVideo()
         {
             Begin();
@@ -53,10 +62,16 @@ namespace CarRapide.EditorTools
             {gopSize=30,numConsecutiveBFrames=2,profile=VideoEncodingProfile.H264High};
             var track=new VideoTrackEncoderAttributes(codec)
             {width=1280,height=720,frameRate=new MediaRational(30),includeAlpha=false,targetBitRate=12000000};
-            video=new MediaEncoder(Folder+"/driver-review.mp4",track,new AudioTrackAttributes[0]);
             previousCaptureRate=Time.captureFramerate;
-            Time.captureFramerate=30;
-            videoFrame=-1;
+            try
+            {
+                Time.captureFramerate=30;
+                captureRateChanged=true;
+                recordedAudio=new VehicleReviewAudioCapture(Folder+"/driver-review-audio.wav");
+                video=new MediaEncoder(Folder+"/driver-review.mp4",track,new[]{recordedAudio.Track});
+                videoFrame=-1;
+            }
+            catch { End(); throw; }
         }
         [MenuItem("Car Rapide/Vehicle/Record passenger Play Mode review")]
         public static void BeginPassenger()
@@ -84,6 +99,9 @@ namespace CarRapide.EditorTools
             {
                 videoFrame=Time.frameCount;
                 Capture(null);
+                try { recordedAudio.CaptureFrame(video,e.Engine.IsRunning); }
+                catch { End(); throw; }
+                peakAudio=Mathf.Max(peakAudio,recordedAudio.RunningPeak);
             }
             if(passengerReview)
             {
@@ -124,8 +142,11 @@ namespace CarRapide.EditorTools
             {
                 requestedInput=t<25?new KeyboardState(Key.W,Key.D):t<28?new KeyboardState(Key.Space):new KeyboardState(Key.S);
                 peakSpeed=Mathf.Max(peakSpeed,e.GetComponent<VehicleController>().SpeedKmh);
-                AudioListener.GetOutputData(audioSamples,0);
-                foreach(float sample in audioSamples) peakAudio=Mathf.Max(peakAudio,Mathf.Abs(sample));
+                if(recordedAudio==null)
+                {
+                    AudioListener.GetOutputData(audioSamples,0);
+                    foreach(float sample in audioSamples) peakAudio=Mathf.Max(peakAudio,Mathf.Abs(sample));
+                }
                 if(t>27 && t<28) braked |= e.GetComponent<VehicleController>().SpeedKmh<.5f;
             }
             greatestContactError=Mathf.Max(greatestContactError,e.Driver.Rig.MaxContactError);
@@ -140,6 +161,7 @@ namespace CarRapide.EditorTools
             }
             if(t>=30)
             {
+                if(recordedAudio!=null) Check(recordedAudio.ClippedSamples==0,"Recorded audio remains below digital clipping");
                 Check(observedIgnition && ignitionStayedLocked,"Held controls remain locked throughout engine startup");
                 Check(e.Engine.IsRunning && e.Engine.Audio.LoopPlaying,"Engine audio sources remain active during driving");
                 Check(Vector3.Distance(origin,e.transform.position)>2,"Vehicle travels after ignition"); End();
@@ -160,7 +182,12 @@ namespace CarRapide.EditorTools
         static void End()
         {
             active=false; EditorApplication.update-=Tick;
-            if(video!=null) {video.Dispose();video=null;Time.captureFramerate=previousCaptureRate;}
+            if(recordedAudio!=null || video!=null)
+            {
+                recordedAudio?.Dispose(); recordedAudio=null;
+                video?.Dispose(); video=null;
+            }
+            if(captureRateChanged) { Time.captureFramerate=previousCaptureRate; captureRateChanged=false; }
             VehicleMotionBaker.End();
             InputSystem.onBeforeUpdate-=InjectInput;
             if(keyboard!=null && keyboard.added) InputSystem.RemoveDevice(keyboard);

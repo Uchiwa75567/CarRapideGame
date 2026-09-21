@@ -40,7 +40,7 @@ All interaction anchors are serialized under `CarRapidePlayer/InteractionPoints`
 - `DriverAnimationController` blends Animator clips and contact tracks.
 - `CharacterContactRig` applies a final two-bone solve for feet and hands with explicit elbow/knee poles. Planted feet keep fixed contact coordinates while the other foot follows a lifted swing arc. The pelvis trajectory shifts over supporting feet. The character root is not lerped to the seat.
 - `VehicleDoorController` animates the real door and attached left mirror/handle.
-- `VehicleEngineController` gates ignition and `CanDrive`; `VehicleAudioController` crossfades the recorded idle/load loops.
+- `VehicleEngineController` gates ignition and `CanDrive`; `VehicleAudioController` blends recorded truck idle, load and mechanical rattle layers from the front engine position. Speed and propulsion demand control pitch/volume, with gentle irregularity for a worn motor. Braking does not count as throttle.
 - `VehicleCameraController` chooses views; `VehicleCameraFollow` supplies continuous damping.
 - `ReceiverController` filters vehicle acceleration into small body compensation movements while keeping feet and the hand attached to the vehicle.
 - `PassengerController` demonstrates the shared contact animation architecture. Its waiting area remains in world space, so an unboarded person does not follow the departing vehicle.
@@ -57,7 +57,7 @@ The review also captures the complete solved Humanoid muscle performance. After 
 
 `Record passenger Play Mode review` records the rear entry, seating and exit separately in `Library/VehicleReview/Passenger`. Both reviews report contact reach errors against a 5 cm maximum threshold. The driving review also checks steering, handbrake stopping, reverse motion, held controls throughout ignition, and actual audio samples at the listener. Run them individually; use a fresh Play Mode session for the driving review.
 
-`Record driver review with silent MP4` additionally exports `Library/VehicleReview/Run/driver-review.mp4` at 1280×720, H.264 with a 12 Mbps target bitrate. It uses a fixed 30 fps simulation during recording and restores the previous capture rate afterwards. Encoding can take longer than the 30 seconds shown in the video. The export is visual only; engine audio remains part of live gameplay and is checked by the review.
+`Record driver review with audio MP4` additionally exports `Library/VehicleReview/Run/driver-review.mp4` at 1280×720, H.264 with a 12 Mbps target bitrate. It captures Unity's actual listener mix into the MP4 and a companion `driver-review-audio.wav`. The simulation uses a fixed 30 fps during capture and restores its previous rate afterwards, including on interruption. Unity routes sound to the recording while this export runs; normal playback resumes afterwards. Encoding can take longer than the 30 seconds shown in the video.
 
 `VehicleReviewBridge` is an Editor-only local file command harness for repeatable visual inspection. It only accepts a fixed set of commands and writes to the ignored `Library/VehicleReview` directory.
 
@@ -65,10 +65,10 @@ The review also captures the complete solved Humanoid muscle performance. After 
 
 Verified in the actual Unity 6000.6.1f1 editor on Windows, with repeated Play Mode recordings and visual inspection of the original front/rear doors, step contacts, cabin seating, wheel grips, roof clearance, camera transitions and receiver platform placement.
 
-- Driver review: all 12 checks passed, including held W+A before boarding and throughout ignition, door closure, running audio, acceleration above 30 km/h, steering, handbrake stopping and reverse.
+- Driver review with the worn truck engine: all 13 checks passed, including held W+A before boarding and throughout ignition, door closure, running audio, acceleration above 30 km/h, steering, handbrake stopping, reverse and no digital audio clipping.
 - Driver contact error: maximum 0.044 m during motion; seated feet and wheel grips report 0.000 m at the recorded precision.
 - Passenger review: all 3 checks passed; maximum contact error 0.032 m, with seating reached before alighting and the ignition interlock released afterwards.
-- Audio was measured at the listener during driving, rather than checking only whether an AudioSource exists.
-- The reviewed MP4 contains 900 frames at 30 fps (30 seconds). A local delivery copy and check logs are under `Recordings/VehicleExperience/`, ignored by Git. The MP4 is silent; live gameplay includes the engine recordings.
+- The captured listener mix reaches a peak of 0.2699 during driving (0.5739 including the starter). The engine is silent before ignition. Driving RMS is 0.0733 and falls to 0.0629 during the braking segment.
+- The reviewed MP4 contains 900 frames at 30 fps (30 seconds), with both video and audio tracks. The companion WAV contains 29.995 seconds of stereo 48 kHz audio. A local delivery copy, driving sound preview and check logs are under `Recordings/VehicleExperience/`, ignored by Git.
 
 Validation covers this scene in Play Mode; no standalone player build was produced. The avatar styling and engine recordings remain generic, as detailed in `CREDITS.md`.

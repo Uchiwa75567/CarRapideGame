@@ -32,6 +32,19 @@ namespace CarRapide.Vehicle
 
         public bool CanDrive { get; set; }
 
+        // Propulsion demand excludes S while braking forward travel.
+        public float EngineLoad
+        {
+            get
+            {
+                if (!CanDrive || handbrakePressed || vehicleRigidbody == null) return 0;
+                float speed = Vector3.Dot(vehicleRigidbody.linearVelocity, transform.forward);
+                if (moveInput.y > .01f && speed >= -.25f) return moveInput.y;
+                if (moveInput.y < -.01f && speed <= .25f) return -moveInput.y;
+                return 0;
+            }
+        }
+
         public float SpeedKmh
         {
             get
